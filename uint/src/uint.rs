@@ -1339,8 +1339,46 @@ macro_rules! impl_std_for_uint {
 #[cfg(not(feature="std"))]
 #[macro_export]
 #[doc(hidden)]
-macro_rules! impl_std_for_uint {
+/*macro_rules! impl_std_for_uint {
 	($name: ident, $n_words: tt) => {}
+}*/
+macro_rules! impl_std_for_uint {
+	($name: ident, $n_words: tt) => {
+		impl ::core::fmt::Debug for $name {
+			fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+				write!(f, "{:#x}", self)
+			}
+		}
+
+		impl ::core::fmt::LowerHex for $name {
+			fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+				let &$name(ref data) = self;
+				if f.alternate() {
+					write!(f, "0x");
+				}
+				// special case.
+				if self.is_zero() {
+					return write!(f, "0");
+				}
+
+				let mut latch = false;
+				for ch in data.iter().rev() {
+					for x in 0..16 {
+						let nibble = (ch & (15u64 << ((15 - x) * 4) as u64)) >> (((15 - x) * 4) as u64);
+						if !latch {
+							latch = nibble != 0;
+						}
+
+						if latch {
+							write!(f, "{:x}", nibble)?;
+						}
+					}
+				}
+				Ok(())
+			}
+		}
+
+	}
 }
 
 #[cfg(not(feature="std"))]
