@@ -27,162 +27,72 @@ macro_rules! impl_serde {
 	}
 }
 
+#[cfg(not(feature="std"))]
+#[macro_export]
+#[doc(hidden)]
+/*macro_rules! impl_std_for_uint {
+	($name: ident, $n_words: tt) => {}
+}*/
+macro_rules! impl_std_for_uint_new {
+	($name: ident, $n_words: tt) => {
+		impl ::core::fmt::Debug for $name {
+			fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+				write!(f, "{:#x}", self)
+			}
+		}
+
+		impl ::core::fmt::LowerHex for $name {
+			fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+				let &$name(ref data) = self;
+				if f.alternate() {
+					write!(f, "0x");
+				}
+				// special case.
+				if self.is_zero() {
+					return write!(f, "0");
+				}
+
+				let mut latch = false;
+				for ch in data.iter().rev() {
+					for x in 0..16 {
+						let nibble = (ch & (15u64 << ((15 - x) * 4) as u64)) >> (((15 - x) * 4) as u64);
+						if !latch {
+							latch = nibble != 0;
+						}
+
+						if latch {
+							write!(f, "{:x}", nibble)?;
+						}
+					}
+				}
+				Ok(())
+			}
+		}
+
+	}
+}
+
 construct_uint!(U64, 1);
 construct_uint!(U128, 2);
 construct_uint!(U256, 4);
 construct_uint!(U512, 8);
-construct_uint!(U1024, 16);
 
 impl_serde!(U64, 1);
 impl_serde!(U128, 2);
 impl_serde!(U256, 4);
 impl_serde!(U512, 8);
-impl_serde!(U1024, 16);
+
+
+
+impl_std_for_uint_new!(U64, 1);
+impl_std_for_uint_new!(U128, 2);
+impl_std_for_uint_new!(U256, 4);
+impl_std_for_uint_new!(U512, 8);
 
 impl U256 {
 	/// Multiplies two 256-bit integers to produce full 512-bit integer
 	/// No overflow possible
-	#[cfg(all(asm_available, target_arch="x86_64"))]
-	pub fn full_mul(self, other: U256) -> U512 {
-		let self_t: &[u64; 4] = &self.0;
-		let other_t: &[u64; 4] = &other.0;
-		let mut result: [u64; 8] = unsafe { ::core::mem::uninitialized() };
-		unsafe {
-			asm!("
-				mov $8, %rax
-				mulq $12
-				mov %rax, $0
-				mov %rdx, $1
-
-				mov $8, %rax
-				mulq $13
-				add %rax, $1
-				adc $$0, %rdx
-				mov %rdx, $2
-
-				mov $8, %rax
-				mulq $14
-				add %rax, $2
-				adc $$0, %rdx
-				mov %rdx, $3
-
-				mov $8, %rax
-				mulq $15
-				add %rax, $3
-				adc $$0, %rdx
-				mov %rdx, $4
-
-				mov $9, %rax
-				mulq $12
-				add %rax, $1
-				adc %rdx, $2
-				adc $$0, $3
-				adc $$0, $4
-				xor $5, $5
-				adc $$0, $5
-				xor $6, $6
-				adc $$0, $6
-				xor $7, $7
-				adc $$0, $7
-
-				mov $9, %rax
-				mulq $13
-				add %rax, $2
-				adc %rdx, $3
-				adc $$0, $4
-				adc $$0, $5
-				adc $$0, $6
-				adc $$0, $7
-
-				mov $9, %rax
-				mulq $14
-				add %rax, $3
-				adc %rdx, $4
-				adc $$0, $5
-				adc $$0, $6
-				adc $$0, $7
-
-				mov $9, %rax
-				mulq $15
-				add %rax, $4
-				adc %rdx, $5
-				adc $$0, $6
-				adc $$0, $7
-
-				mov $10, %rax
-				mulq $12
-				add %rax, $2
-				adc %rdx, $3
-				adc $$0, $4
-				adc $$0, $5
-				adc $$0, $6
-				adc $$0, $7
-
-				mov $10, %rax
-				mulq $13
-				add %rax, $3
-				adc %rdx, $4
-				adc $$0, $5
-				adc $$0, $6
-				adc $$0, $7
-
-				mov $10, %rax
-				mulq $14
-				add %rax, $4
-				adc %rdx, $5
-				adc $$0, $6
-				adc $$0, $7
-
-				mov $10, %rax
-				mulq $15
-				add %rax, $5
-				adc %rdx, $6
-				adc $$0, $7
-
-				mov $11, %rax
-				mulq $12
-				add %rax, $3
-				adc %rdx, $4
-				adc $$0, $5
-				adc $$0, $6
-				adc $$0, $7
-
-				mov $11, %rax
-				mulq $13
-				add %rax, $4
-				adc %rdx, $5
-				adc $$0, $6
-				adc $$0, $7
-
-				mov $11, %rax
-				mulq $14
-				add %rax, $5
-				adc %rdx, $6
-				adc $$0, $7
-
-				mov $11, %rax
-				mulq $15
-				add %rax, $6
-				adc %rdx, $7
-				"
-            : /* $0 */ "={r8}"(result[0]), /* $1 */ "={r9}"(result[1]), /* $2 */ "={r10}"(result[2]),
-			  /* $3 */ "={r11}"(result[3]), /* $4 */ "={r12}"(result[4]), /* $5 */ "={r13}"(result[5]),
-			  /* $6 */ "={r14}"(result[6]), /* $7 */ "={r15}"(result[7])
-
-            : /* $8 */ "m"(self_t[0]), /* $9 */ "m"(self_t[1]), /* $10 */  "m"(self_t[2]),
-			  /* $11 */ "m"(self_t[3]), /* $12 */ "m"(other_t[0]), /* $13 */ "m"(other_t[1]),
-			  /* $14 */ "m"(other_t[2]), /* $15 */ "m"(other_t[3])
-			: "rax", "rdx"
-			:
-			);
-		}
-		U512(result)
-	}
-
-	/// Multiplies two 256-bit integers to produce full 512-bit integer
-	/// No overflow possible
 	#[inline(always)]
-	#[cfg(not(all(asm_available, target_arch="x86_64")))]
 	pub fn full_mul(self, other: U256) -> U512 {
 		U512(uint_full_mul_reg!(U256, 4, self, other))
 	}
@@ -300,62 +210,170 @@ impl From<U256> for u32 {
 	}
 }
 
-impl<'a> From<&'a [u8; 32]> for U256 {
-	fn from(bytes: &[u8; 32]) -> Self {
-		bytes[..].into()
-	}
-}
+#[cfg(test)]
+mod tests {
+	use super::{U256, U512};
+	use std::u64::MAX;
+	use serde_json as ser;
 
-impl From<[u8; 32]> for U256 {
-	fn from(bytes: [u8; 32]) -> Self {
-		bytes[..].as_ref().into()
-	}
-}
+	macro_rules! test_serialize {
+		($name: ident, $test_name: ident) => {
+			#[test]
+			fn $test_name() {
+				let tests = vec![
+					($name::from(0), "0x0"),
+					($name::from(1), "0x1"),
+					($name::from(2), "0x2"),
+					($name::from(10), "0xa"),
+					($name::from(15), "0xf"),
+					($name::from(15), "0xf"),
+					($name::from(16), "0x10"),
+					($name::from(1_000), "0x3e8"),
+					($name::from(100_000), "0x186a0"),
+					($name::from(u64::max_value()), "0xffffffffffffffff"),
+					($name::from(u64::max_value()) + 1, "0x10000000000000000"),
+				];
 
-impl From<U256> for [u8; 32] {
-	fn from(number: U256) -> Self {
-		let mut arr = [0u8; 32];
-		number.to_big_endian(&mut arr);
-		arr
-	}
-}
+				for (number, expected) in tests {
+					assert_eq!(format!("{:?}", expected), ser::to_string_pretty(&number).unwrap());
+					assert_eq!(number, ser::from_str(&format!("{:?}", expected)).unwrap());
+				}
 
-impl<'a> From<&'a [u8; 16]> for U128 {
-	fn from(bytes: &[u8; 16]) -> Self {
-		bytes[..].into()
+				// Invalid examples
+				assert!(ser::from_str::<$name>("\"0x\"").unwrap_err().is_data());
+				assert!(ser::from_str::<$name>("\"0xg\"").unwrap_err().is_data());
+				assert!(ser::from_str::<$name>("\"\"").unwrap_err().is_data());
+				assert!(ser::from_str::<$name>("\"10\"").unwrap_err().is_data());
+				assert!(ser::from_str::<$name>("\"0\"").unwrap_err().is_data());
+			}
+		}
 	}
-}
 
-impl From<[u8; 16]> for U128 {
-	fn from(bytes: [u8; 16]) -> Self {
-		bytes[..].as_ref().into()
+	test_serialize!(U256, test_u256);
+	test_serialize!(U512, test_u512);
+
+	#[test]
+	fn test_serialize_large_values() {
+		assert_eq!(
+			ser::to_string_pretty(&!U256::zero()).unwrap(),
+			"\"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\""
+		);
+		assert!(
+			ser::from_str::<U256>("\"0x1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"").unwrap_err().is_data()
+		);
 	}
-}
 
-impl From<U128> for [u8; 16] {
-	fn from(number: U128) -> Self {
-		let mut arr = [0u8; 16];
-		number.to_big_endian(&mut arr);
-		arr
+	#[test]
+	fn fixed_arrays_roundtrip() {
+		let raw: U256 = "7094875209347850239487502394881".into();
+		let array: [u8; 32] = raw.into();
+		let new_raw = array.into();
+
+		assert_eq!(raw, new_raw);
 	}
-}
 
-impl<'a> From<&'a [u8; 64]> for U512 {
-	fn from(bytes: &[u8; 64]) -> Self {
-		bytes[..].into()
-	}
-}
+	#[test]
+	fn u256_multi_full_mul() {
+		let result = U256([0, 0, 0, 0]).full_mul(U256([0, 0, 0, 0]));
+		assert_eq!(U512([0, 0, 0, 0, 0, 0, 0, 0]), result);
 
-impl From<[u8; 64]> for U512 {
-	fn from(bytes: [u8; 64]) -> Self {
-		bytes[..].as_ref().into()
-	}
-}
+		let result = U256([1, 0, 0, 0]).full_mul(U256([1, 0, 0, 0]));
+		assert_eq!(U512([1, 0, 0, 0, 0, 0, 0, 0]), result);
 
-impl From<U512> for [u8; 64] {
-	fn from(number: U512) -> Self {
-		let mut arr = [0u8; 64];
-		number.to_big_endian(&mut arr);
-		arr
+		let result = U256([5, 0, 0, 0]).full_mul(U256([5, 0, 0, 0]));
+		assert_eq!(U512([25, 0, 0, 0, 0, 0, 0, 0]), result);
+
+		let result = U256([0, 5, 0, 0]).full_mul(U256([0, 5, 0, 0]));
+		assert_eq!(U512([0, 0, 25, 0, 0, 0, 0, 0]), result);
+
+		let result = U256([0, 0, 0, 4]).full_mul(U256([4, 0, 0, 0]));
+		assert_eq!(U512([0, 0, 0, 16, 0, 0, 0, 0]), result);
+
+		let result = U256([0, 0, 0, 5]).full_mul(U256([2, 0, 0, 0]));
+		assert_eq!(U512([0, 0, 0, 10, 0, 0, 0, 0]), result);
+
+		let result = U256([0, 0, 2, 0]).full_mul(U256([0, 5, 0, 0]));
+		assert_eq!(U512([0, 0, 0, 10, 0, 0, 0, 0]), result);
+
+		let result = U256([0, 3, 0, 0]).full_mul(U256([0, 0, 3, 0]));
+		assert_eq!(U512([0, 0, 0, 9, 0, 0, 0, 0]), result);
+
+		let result = U256([0, 0, 8, 0]).full_mul(U256([0, 0, 6, 0]));
+		assert_eq!(U512([0, 0, 0, 0, 48, 0, 0, 0]), result);
+
+		let result = U256([9, 0, 0, 0]).full_mul(U256([0, 3, 0, 0]));
+		assert_eq!(U512([0, 27, 0, 0, 0, 0, 0, 0]), result);
+
+		let result = U256([MAX, 0, 0, 0]).full_mul(U256([MAX, 0, 0, 0]));
+		assert_eq!(U512([1, MAX-1, 0, 0, 0, 0, 0, 0]), result);
+
+		let result = U256([0, MAX, 0, 0]).full_mul(U256([MAX, 0, 0, 0]));
+		assert_eq!(U512([0, 1, MAX-1, 0, 0, 0, 0, 0]), result);
+
+		let result = U256([MAX, MAX, 0, 0]).full_mul(U256([MAX, 0, 0, 0]));
+		assert_eq!(U512([1, MAX, MAX-1, 0, 0, 0, 0, 0]), result);
+
+		let result = U256([MAX, 0, 0, 0]).full_mul(U256([MAX, MAX, 0, 0]));
+		assert_eq!(U512([1, MAX, MAX-1, 0, 0, 0, 0, 0]), result);
+
+		let result = U256([MAX, MAX, 0, 0]).full_mul(U256([MAX, MAX, 0, 0]));
+		assert_eq!(U512([1, 0, MAX-1, MAX, 0, 0, 0, 0]), result);
+
+		let result = U256([MAX, 0, 0, 0]).full_mul(U256([MAX, MAX, MAX, 0]));
+		assert_eq!(U512([1, MAX, MAX, MAX-1, 0, 0, 0, 0]), result);
+
+		let result = U256([MAX, MAX, MAX, 0]).full_mul(U256([MAX, 0, 0, 0]));
+		assert_eq!(U512([1, MAX, MAX, MAX-1, 0, 0, 0, 0]), result);
+
+		let result = U256([MAX, 0, 0, 0]).full_mul(U256([MAX, MAX, MAX, MAX]));
+		assert_eq!(U512([1, MAX, MAX, MAX, MAX-1, 0, 0, 0]), result);
+
+		let result = U256([MAX, MAX, MAX, MAX]).full_mul(U256([MAX, 0, 0, 0]));
+		assert_eq!(U512([1, MAX, MAX, MAX, MAX-1, 0, 0, 0]), result);
+
+		let result = U256([MAX, MAX, MAX, 0]).full_mul(U256([MAX, MAX, 0, 0]));
+		assert_eq!(U512([1, 0, MAX, MAX-1, MAX, 0, 0, 0]), result);
+
+		let result = U256([MAX, MAX, 0, 0]).full_mul(U256([MAX, MAX, MAX, 0]));
+		assert_eq!(U512([1, 0, MAX, MAX-1, MAX, 0, 0, 0]), result);
+
+		let result = U256([MAX, MAX, MAX, MAX]).full_mul(U256([MAX, MAX, 0, 0]));
+		assert_eq!(U512([1, 0, MAX, MAX, MAX-1, MAX, 0, 0]), result);
+
+		let result = U256([MAX, MAX, 0, 0]).full_mul(U256([MAX, MAX, MAX, MAX]));
+		assert_eq!(U512([1, 0, MAX, MAX, MAX-1, MAX, 0, 0]), result);
+
+		let result = U256([MAX, MAX, MAX, 0]).full_mul(U256([MAX, MAX, MAX, 0]));
+		assert_eq!(U512([1, 0, 0, MAX-1, MAX, MAX, 0, 0]), result);
+
+		let result = U256([MAX, MAX, MAX, 0]).full_mul(U256([MAX, MAX, MAX, MAX]));
+		assert_eq!(U512([1, 0, 0, MAX,	MAX-1, MAX, MAX, 0]), result);
+
+		let result = U256([MAX, MAX, MAX, MAX]).full_mul(U256([MAX, MAX, MAX, 0]));
+		assert_eq!(U512([1, 0, 0, MAX,	MAX-1, MAX, MAX, 0]), result);
+
+		let result = U256([MAX, MAX, MAX, MAX]).full_mul(U256([MAX, MAX, MAX, MAX]));
+		assert_eq!(U512([1, 0, 0, 0, MAX-1, MAX, MAX, MAX]), result);
+
+		let result = U256([0, 0, 0, MAX]).full_mul(U256([0, 0, 0, MAX]));
+		assert_eq!(U512([0, 0, 0, 0, 0, 0, 1, MAX-1]), result);
+
+		let result = U256([1, 0, 0, 0]).full_mul(U256([0, 0, 0, MAX]));
+		assert_eq!(U512([0, 0, 0, MAX, 0, 0, 0, 0]), result);
+
+		let result = U256([1, 2, 3, 4]).full_mul(U256([5, 0, 0, 0]));
+		assert_eq!(U512([5, 10, 15, 20, 0, 0, 0, 0]), result);
+
+		let result = U256([1, 2, 3, 4]).full_mul(U256([0, 6, 0, 0]));
+		assert_eq!(U512([0, 6, 12, 18, 24, 0, 0, 0]), result);
+
+		let result = U256([1, 2, 3, 4]).full_mul(U256([0, 0, 7, 0]));
+		assert_eq!(U512([0, 0, 7, 14, 21, 28, 0, 0]), result);
+
+		let result = U256([1, 2, 3, 4]).full_mul(U256([0, 0, 0, 8]));
+		assert_eq!(U512([0, 0, 0, 8, 16, 24, 32, 0]), result);
+
+		let result = U256([1, 2, 3, 4]).full_mul(U256([5, 6, 7, 8]));
+		assert_eq!(U512([5, 16, 34, 60, 61, 52, 32, 0]), result);
 	}
 }
